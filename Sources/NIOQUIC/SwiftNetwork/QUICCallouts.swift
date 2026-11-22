@@ -222,7 +222,8 @@ enum QUICCallout {
 @available(anyAppleOS 27, *)
 enum QUICConnectionCallout {
     /// The handshake completed. The peer accepts datagrams up to the given size, none if it's zero.
-    case handshakeCompleted(peerMaxDatagramFrameSize: Int)
+    /// The exporter is the TLS handshake's, `nil` if it published none.
+    case handshakeCompleted(peerMaxDatagramFrameSize: Int, exporter: QUICTLSExporter?)
     /// The connection closed, with an error or cleanly.
     case closed((any Error)?)
     /// The connection associated a new connection ID with itself: `QUICSCIDAssociatedEvent`.

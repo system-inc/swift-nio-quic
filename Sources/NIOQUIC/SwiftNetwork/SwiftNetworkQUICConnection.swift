@@ -1450,8 +1450,21 @@ extension SwiftNetworkQUICConnection where Consumer: ~Copyable {
             // The datagram flow was attached in `start`. Tell the channel the peer's advertised size.
             // This completes datagram writes buffered before the handshake and flushes them.
             let peerMaxDatagramFrameSize = self.peerMaxDatagramFrameSize(in: &eventContext)
+            // QUIC republishes what its TLS handshake produced on the connection's metadata.
+            let exportKeyingMaterialFunction =
+                self.connectionNewFlowHandler?
+                .getConnectionMetadata(in: &eventContext)?
+                .connectionMetadata?
+                .swiftTLSMetadata?
+                .withPerProtocolMetadata { metadata in metadata?.tlsMetadata.exportKeyingMaterialFunction }
             self.callouts.add(
-                .connection(self, .handshakeCompleted(peerMaxDatagramFrameSize: peerMaxDatagramFrameSize)),
+                .connection(
+                    self,
+                    .handshakeCompleted(
+                        peerMaxDatagramFrameSize: peerMaxDatagramFrameSize,
+                        exporter: exportKeyingMaterialFunction.map { QUICTLSExporter(exportKeyingMaterialFunction: $0) }
+                    )
+                ),
                 in: &eventContext
             )
 
@@ -2075,8 +2088,8 @@ extension SwiftNetworkQUICConnection: QUICConnectionCalloutTarget where Consumer
     /// Hands a call queued while the event context was held to the channel.
     func run(_ callout: QUICConnectionCallout) {
         switch callout {
-        case .handshakeCompleted(let peerMaxDatagramFrameSize):
-            self.channelView?.handshakeCompleted(peerMaxDatagramFrameSize: peerMaxDatagramFrameSize)
+        case .handshakeCompleted(let peerMaxDatagramFrameSize, let exporter):
+            self.channelView?.handshakeCompleted(peerMaxDatagramFrameSize: peerMaxDatagramFrameSize, exporter: exporter)
         case .closed(let error):
             self.channelView?.connectionClosed(error: error)
         case .connectionIDAssociated(let connectionID):

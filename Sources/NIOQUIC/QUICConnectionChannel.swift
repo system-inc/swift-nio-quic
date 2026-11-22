@@ -92,6 +92,9 @@ final class QUICConnectionChannel<Consumer: QUICStreamConsumer & ~Copyable>: @un
     /// Whether auto-read is enabled on this channel.
     private var _autoRead: Bool
 
+    /// The TLS exporter, set once the handshake completes.
+    private var _tlsExporter: QUICTLSExporter?
+
     /// Whether the channel is allowed to drain the output from the connection.
     private var _isAllowedToDrain: Bool
 
@@ -159,6 +162,7 @@ final class QUICConnectionChannel<Consumer: QUICStreamConsumer & ~Copyable>: @un
         self._table = table
         self._lifecycle = QUICConnectionChannelLifecycle()
         self._autoRead = true
+        self._tlsExporter = nil
         self._streamInitializer = nil
         self._readyPromise = nil
         self._isAllowedToDrain = true
@@ -258,6 +262,8 @@ extension QUICConnectionChannel: Channel where Consumer: ~Copyable {
             switch option {
             case is ChannelOptions.Types.AutoReadOption:
                 return self.channel._autoRead as! Option.Value
+            case is ChannelOptions.Types.QUICTLSExporterChannelOption:
+                return self.channel._tlsExporter as! Option.Value
             default:
                 throw ChannelError.operationUnsupported
             }
@@ -486,7 +492,9 @@ extension QUICConnectionChannel.ConnectionView where Consumer: ~Copyable {
     ///
     /// - Parameter peerMaxDatagramFrameSize: The peer's advertised `max_datagram_frame_size`
     ///   or `0` if the peer does not accept datagrams.
-    func handshakeCompleted(peerMaxDatagramFrameSize: Int) {
+    func handshakeCompleted(peerMaxDatagramFrameSize: Int, exporter: QUICTLSExporter? = nil) {
+        // Before activation, so the exporter can be read from `channelActive` on.
+        self._channel._tlsExporter = exporter
         self._channel._connectionActivated(peerMaxDatagramFrameSize: peerMaxDatagramFrameSize)
     }
 

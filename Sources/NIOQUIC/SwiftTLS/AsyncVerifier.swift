@@ -30,6 +30,12 @@ enum CertificateVerificationResult {
     case invalid(reason: String)
 }
 
+/// What a caller's own check of the peer's certificates decides. See ``AsyncVerifier/init(checkingPeerCertificates:eventLoop:)``.
+public enum PeerCertificateDecision: Sendable {
+    case accept
+    case reject(reason: String)
+}
+
 @available(anyAppleOS 27, *)
 struct CallbackVerificationInput {
     var verificationInfo: VerificationInfo
@@ -47,6 +53,8 @@ public final class AsyncVerifier: Sendable {
     private let useSecurityFrameworkVerifier: Bool
 
     private let certificateVerification: CertificateVerification
+    // A caller's own check, which stands in for trust evaluation when set.
+    private let peerCertificateCheck: (@Sendable ([Certificate]) async -> PeerCertificateDecision)?
 
     private let eventLoop: (any EventLoop)?
 
@@ -86,6 +94,7 @@ public final class AsyncVerifier: Sendable {
         #endif
         self.additionalTrustRoots = []
         self.certificateVerification = certificateVerification
+        self.peerCertificateCheck = nil
         self.eventLoop = eventLoop
     }
 
@@ -110,6 +119,7 @@ public final class AsyncVerifier: Sendable {
         self.trustStore = CertificateStore(trustRoots)
         self.additionalTrustRoots = []
         self.certificateVerification = certificateVerification
+        self.peerCertificateCheck = nil
         self.eventLoop = eventLoop
     }
 
@@ -143,6 +153,32 @@ public final class AsyncVerifier: Sendable {
         self.additionalTrustRoots = []
         #endif
         self.certificateVerification = certificateVerification
+        self.peerCertificateCheck = nil
+        self.eventLoop = eventLoop
+    }
+
+    /// Create a verifier whose trust decision is the caller's own, for peers no authority signs,
+    /// such as a server pinned by its key.
+    ///
+    /// `check` receives the peer's certificates, leaf first, and replaces trust evaluation and hostname
+    /// checks. The handshake's CertificateVerify signature is still checked against the leaf's public
+    /// key after `check` accepts, so a peer that replays a certificate without its private key fails.
+    ///
+    /// - Parameter check: Decides whether the peer's certificates are acceptable.
+    /// - Parameter eventLoop: When running outside of the TLS handshake event loop, pass in `eventLoop` to continue the handshake on the correct thread.
+    public init(
+        checkingPeerCertificates check: @escaping @Sendable (_ certificates: [Certificate]) async -> PeerCertificateDecision,
+        eventLoop: (any EventLoop)? = nil
+    ) {
+        let (stream, continuation) = AsyncStream.makeStream(of: CallbackVerificationInput.self)
+        self.stream = stream
+        self.continuation = continuation
+        self.trustStore = nil
+        self.useSecurityFrameworkVerifier = false
+        self.additionalTrustRoots = []
+        // Anything but `.noVerification`, so `makeCallback` hands every handshake to `verifyHandshake`.
+        self.certificateVerification = .fullVerification
+        self.peerCertificateCheck = check
         self.eventLoop = eventLoop
     }
 
@@ -218,7 +254,14 @@ public final class AsyncVerifier: Sendable {
         }
 
         let verificationResult: CertificateVerificationResult
-        if self.useSecurityFrameworkVerifier {
+        if let peerCertificateCheck = self.peerCertificateCheck {
+            switch await peerCertificateCheck(certificates) {
+            case .accept:
+                verificationResult = .valid
+            case .reject(let reason):
+                verificationResult = .invalid(reason: reason)
+            }
+        } else if self.useSecurityFrameworkVerifier {
             #if canImport(Darwin)
             verificationResult = await performSecurityFrameworkValidation(verificationInput)
             #else
