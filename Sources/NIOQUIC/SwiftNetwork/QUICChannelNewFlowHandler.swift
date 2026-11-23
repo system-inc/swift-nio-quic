@@ -170,6 +170,20 @@ final class QUICChannelNewFlowHandler<Consumer: QUICStreamConsumer & ~Copyable>:
             as? ProtocolMetadata<QUICProtocol>
     }
 
+    // Fetch the active path's smoothed RTT via the main connection linkage. QUIC fills its data
+    // transfer snapshot from that path's RTT estimator, and leaves it zero when it has no path.
+    func getConnectionSmoothedRoundTrip(in eventContext: inout NetworkContext.EventContext) -> Duration? {
+        let metrics = self.lowerProtocol?.invokeGetMetrics(
+            requestedNetworkMetric: .dataTransferSnapshot,
+            for: self.identifier,
+            in: &eventContext
+        )
+        guard case .dataTransferSnapshot(let snapshot) = metrics, snapshot.transportSmoothedRTT > .zero else {
+            return nil
+        }
+        return .nanoseconds(snapshot.transportSmoothedRTT.nanoseconds)
+    }
+
     // Stop the new flow handler
     func stop(error: NetworkError? = nil, in eventContext: inout NetworkContext.EventContext) {
         log("stop")

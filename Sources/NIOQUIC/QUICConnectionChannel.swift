@@ -264,6 +264,16 @@ extension QUICConnectionChannel: Channel where Consumer: ~Copyable {
                 return self.channel._autoRead as! Option.Value
             case is ChannelOptions.Types.QUICTLSExporterChannelOption:
                 return self.channel._tlsExporter as! Option.Value
+            case is ChannelOptions.Types.QUICSmoothedRoundTripChannelOption:
+                // Read afresh each time, since the estimator moves with every acknowledgement.
+                let smoothedRoundTrip: Duration?
+                switch self.channel._connection {
+                case .live(let connection):
+                    smoothedRoundTrip = connection.smoothedRoundTrip()
+                case .test:
+                    smoothedRoundTrip = nil
+                }
+                return smoothedRoundTrip as! Option.Value
             default:
                 throw ChannelError.operationUnsupported
             }

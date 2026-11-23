@@ -1650,6 +1650,15 @@ extension SwiftNetworkQUICConnection where Consumer: ~Copyable {
             )
         }
     }
+
+    /// The smoothed round trip of the connection's active path, `nil` once the flow handler is gone.
+    func smoothedRoundTrip() -> Duration? {
+        guard let flowHandler = self.connectionNewFlowHandler else { return nil }
+
+        return self.callouts.enter(as: flowHandler) { eventContext in
+            flowHandler.getConnectionSmoothedRoundTrip(in: &eventContext)
+        }
+    }
 }
 
 @available(anyAppleOS 27, *)
